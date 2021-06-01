@@ -1,0 +1,2 @@
+variable "secret_key" {
+}
