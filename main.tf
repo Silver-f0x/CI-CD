@@ -31,7 +31,6 @@ locals {
   public_subnet_ids  = module.VPC.public_subnet_ids
   private_subnet_ids = module.VPC.private_subnet_ids
   vpc_id             = module.VPC.VPC_id
-  EFS_SecurityGroup  = module.EFS.EFS_SecurityGroup
 }
 
 
@@ -57,7 +56,7 @@ module "EFS" {
   source                 = "./modules/EFS"
   vpc_id                 = local.vpc_id
   AZ_Names               = local.AZ_Names
-  JenkinsSecurityGroupId = [aws_security_group.JenkinsSecurityGroup.id]
+  JenkinsSecurityGroupId = [module.SecurityGroups.JenkinsSecurityGroup.id]  
   public_subnets         = local.public_subnet_ids
   private_subnets        = local.private_subnet_ids
 }
@@ -83,18 +82,38 @@ module "IAMRoles" {
   jenkins_password         = module.SecretsManager.JenkinsPassword
 }
 
-#-------------------------------------------------------------------------------
-
-
-resource "aws_security_group_rule" "JenkinsEgress" {
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  security_group_id = aws_security_group.JenkinsSecurityGroup.id
-  cidr_blocks       = ["0.0.0.0/0"]
+module "SecurityGroups" {
+  source = "./modules/Security-Groups"
+  vpc_id          = local.vpc_id
+  JenkinsJNLPPort = var.JenkinsJNLPPort
 }
 
+module "ECS" {
+  source = "./modules/ECS"
+  vpc_id          = local.vpc_id
+  discovery_service = module.DiscoveryService.DiscoveryService
+  private_subnet_ids = local.private_subnet_ids
+  ClusterName = var.ClusterName
+  JenkinsSecurityGroup = module.SecurityGroups.JenkinsSecurityGroup
+  JenkinsAgentSecurityGroup = module.SecurityGroups.JenkinsAgentSecurityGroup
+  EFS_SecurityGroup = module.EFS.EFS_SecurityGroup
+  jenkins_password = module.SecretsManager.JenkinsPassword
+  JenkinsUsername = var.JenkinsUsername
+  JenkinsJNLPPort = var.JenkinsJNLPPort
+  JenkinsURL = var.JenkinsURL
+  CloudwatchLogsGroup = aws_cloudwatch_log_group.CloudwatchLogsGroup
+  CloudwatchLogsAgent = aws_cloudwatch_log_group.CloudwatchLogsAgent
+  RegionName = data.aws_region.current.name
+  ECSTaskRole = module.IAMRoles.ECSTaskRole
+  ECSExecutionRole = module.IAMRoles.ECSExecutionRole
+  AccessPointResource = module.EFS.AccessPointResource
+  FileSystemResource = module.EFS.FileSystemResource
+  Namespace = var.Namespace
+  LoadBalancerListenerHTTPS = module.VPC.LoadBalancerListenerHTTPS
+  JenkinsTargetGroup = aws_lb_target_group.JenkinsTargetGroup
+}
+
+#-------------------------------------------------------------------------------
 
 resource "aws_lb_target_group" "JenkinsTargetGroup" {
   health_check {
@@ -110,64 +129,6 @@ resource "aws_lb_target_group" "JenkinsTargetGroup" {
   deregistration_delay = 10
 }
 
-resource "aws_security_group" "JenkinsSecurityGroup" {
-  name   = "JenkinsSecurityGroup"
-  vpc_id = local.vpc_id
-}
-
-
-resource "aws_security_group_rule" "JenkinsAgentEgress" {
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  cidr_blocks       = ["0.0.0.0/0"]
-  protocol          = "-1"
-  security_group_id = aws_security_group.JenkinsAgentSecurityGroup.id
-}
-
-
-
-resource "aws_security_group_rule" "EFSJenkinsIngress" {
-  type              = "ingress"
-  from_port         = 2049
-  to_port           = 2049
-  protocol          = "tcp"
-  security_group_id = aws_security_group.JenkinsSecurityGroup.id
-  cidr_blocks       = ["0.0.0.0/0"]
-}
-
-resource "aws_security_group_rule" "JenkinsIngress" {
-  type              = "ingress"
-  from_port         = 8080
-  to_port           = 8080
-  protocol          = "tcp"
-  security_group_id = aws_security_group.JenkinsSecurityGroup.id
-  cidr_blocks       = ["0.0.0.0/0"]
-}
-
-resource "aws_security_group_rule" "JenkinsAgentIngress" {
-  type              = "ingress"
-  from_port         = var.JenkinsJNLPPort
-  to_port           = var.JenkinsJNLPPort
-  protocol          = "tcp"
-  security_group_id = aws_security_group.JenkinsAgentSecurityGroup.id
-  cidr_blocks       = ["0.0.0.0/0"]
-}
-
-resource "aws_security_group_rule" "JenkinsMasterIngress" {
-  type              = "ingress"
-  from_port         = var.JenkinsJNLPPort
-  to_port           = var.JenkinsJNLPPort
-  protocol          = "tcp"
-  security_group_id = aws_security_group.JenkinsSecurityGroup.id
-  cidr_blocks       = ["0.0.0.0/0"]
-}
-
-resource "aws_ecs_cluster" "ECSCluster" {
-  name = var.ClusterName
-}
-
-
 resource "aws_cloudwatch_log_group" "CloudwatchLogsGroup" {
   name              = "CloudwatchLogsGroup"
   retention_in_days = 7
@@ -177,113 +138,3 @@ resource "aws_cloudwatch_log_group" "CloudwatchLogsAgent" {
   name              = "CloudwatchLogsAgent"
   retention_in_days = 7
 }
-
-resource "aws_ecs_task_definition" "JenkinsTaskDefinition" {
-  family                   = "jenkins-task"
-  task_role_arn            = module.IAMRoles.ECSTaskRole.arn
-  execution_role_arn       = module.IAMRoles.ECSExecutionRole.arn
-  network_mode             = "awsvpc"
-  cpu                      = 512
-  memory                   = 1024
-  requires_compatibilities = ["FARGATE", "EC2"]
-
-  depends_on = [aws_cloudwatch_log_group.CloudwatchLogsGroup, aws_cloudwatch_log_group.CloudwatchLogsAgent]
-
-  volume {
-    name = "jenkins-home"
-
-    efs_volume_configuration {
-      file_system_id     = module.EFS.FileSystemResource.id
-      transit_encryption = "ENABLED"
-      authorization_config {
-        access_point_id = module.EFS.AccessPointResource.id
-        iam             = "ENABLED"
-      }
-    }
-  }
-
-  container_definitions = jsonencode([{
-    name  = "jenkins"
-    image = "tkgregory/jenkins-ecs-agents:latest"
-
-    portMappings = [
-      { containerPort = 8080 },
-      { containerPort = var.JenkinsJNLPPort }
-    ]
-
-    mountPoints = [
-      {
-        ContainerPath = "/var/jenkins_home"
-        sourceVolume  = "jenkins-home"
-      }
-    ]
-
-    logConfiguration = {
-      LogDriver = "awslogs"
-      Options = {
-        awslogs-group         = "CloudwatchLogsGroup"
-        awslogs-region        = data.aws_region.current.name
-        awslogs-stream-prefix = "jenkins"
-      }
-    }
-
-
-    environment = [
-      { "name" : "AGENT_EXECUTION_ROLE_ARN", "value" : module.IAMRoles.ECSExecutionRole.arn },
-      { "name" : "AGENT_SECURITY_GROUP_ID", "value" : aws_security_group.JenkinsAgentSecurityGroup.id },
-      { "name" : "AWS_REGION", "value" : data.aws_region.current.name },
-      { "name" : "ECS_AGENT_CLUSTER", "value" : var.ClusterName },
-      { "name" : "JENKINS_URL", "value" : format("%s/", var.JenkinsURL) },
-      { "name" : "LOG_GROUP_NAME", "value" : aws_cloudwatch_log_group.CloudwatchLogsAgent.name },
-      { "name" : "PRIVATE_JENKINS_HOST_AND_PORT", "value" : format("%s.%s:50000", module.DiscoveryService.DiscoveryService.name, var.Namespace) },
-      { "name" : "SUBNET_IDS", "value" : join(", ", local.private_subnet_ids) },
-
-      { "name" : "JENKINS_USERNAME", "value" : var.JenkinsUsername }
-    ]
-
-    secrets = [{
-      name : "JENKINS_PASSWORD",
-      valueFrom : module.SecretsManager.JenkinsPassword.arn
-    }]
-  }])
-}
-
-
-resource "aws_ecs_service" "JenkinsService" {
-  name                               = "JenkinsService"
-  depends_on                         = [module.VPC.LoadBalancerListenerHTTPS]
-  cluster                            = aws_ecs_cluster.ECSCluster.arn
-  task_definition                    = aws_ecs_task_definition.JenkinsTaskDefinition.arn
-  desired_count                      = 1
-  health_check_grace_period_seconds  = 300
-  launch_type                        = "FARGATE"
-  platform_version                   = "1.4.0"
-  deployment_minimum_healthy_percent = 0
-  deployment_maximum_percent         = 100
-
-  network_configuration {
-    assign_public_ip = true
-    subnets          = local.private_subnet_ids
-    security_groups  = [aws_security_group.JenkinsSecurityGroup.id, local.EFS_SecurityGroup.id, aws_security_group.JenkinsAgentSecurityGroup.id]
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.JenkinsTargetGroup.arn
-    container_name   = "jenkins"
-    container_port   = 8080
-  }
-
-  service_registries {
-    registry_arn = module.DiscoveryService.DiscoveryService.arn
-    port         = var.JenkinsJNLPPort
-  }
-}
-
-
-resource "aws_security_group" "JenkinsAgentSecurityGroup" {
-  name   = "JenkinsAgentSecurityGroup"
-  vpc_id = local.vpc_id
-}
-
-
-
