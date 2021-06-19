@@ -29,3 +29,18 @@ An AWS account
 Terraform 13+  
 A SSL certificate to use with the Application Load Balancer
 
+
+# Variables
+| Variable  | Description | Type | Default | Required
+| ------------- | ------------- |
+| Region  | Which AWS region to build the infrastructure | String | US East 1 | No |
+| CertificateArn | An ARN for your SSL certificate | String | N/A | Yes | 
+| ClusterName | What to name your ECS cluster | String | default-cluster | No |
+| JenkinsJNLPPort | Which JNLP Port Jenkins should use | Number | 50000 | No |
+| JenkinsUsername | Which username to login to Jenkins with | String | developer | No |
+| JenkinsURL | Which URL should redirect to the Jenkins master | String | N/A | Yes |
+| NameSpace | The NameSpace for Jenkins in the discovery service | String | discoverjenkins | No |
+| DiscoveryName | The name for Jenkins in the discovery service | String | jenkins | No |
+| route53_alias_name | The alias name for Jenkins in DNS | String | N/A | Yes |
+| How_Many_AvailabilityZones | How many Availability Zones your infrastructure should be spread across for reliability (minimum 2) | Number | 2 | No |
+
