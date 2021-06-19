@@ -31,8 +31,8 @@ A SSL certificate to use with the Application Load Balancer
 
 
 # Variables
-| Variable  | Description | Type | Default | Required
-| ------------- | ------------- |
+| Variable  | Description | Type | Default | Required |
+| --- | --- | --- | --- | --- |
 | Region  | Which AWS region to build the infrastructure | String | US East 1 | No |
 | CertificateArn | An ARN for your SSL certificate | String | N/A | Yes | 
 | ClusterName | What to name your ECS cluster | String | default-cluster | No |
