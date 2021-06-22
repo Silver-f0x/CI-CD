@@ -50,7 +50,7 @@ variable "DiscoveryName" {
 
 variable "route53_zone_id" {
   type    = string
-  default = "Z03479822DKZ88ORA866O"  Z03479822DKZ88ORA8660
+  default = "Z03479822DKZ88ORA866O"
 }
 
 variable "route53_alias_name" {
